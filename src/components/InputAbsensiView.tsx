@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { ClipboardCheck, Camera, CheckCircle2, Save, UserCheck, AlertCircle, History, BarChart3, Pencil, Trash2, Search, Filter, X, Check } from "lucide-react";
 import jsQR from "jsqr";
 import { Siswa, Mapel, LogAbsensi, Pengaturan } from "../types";
-import { saveDocument, deleteDocument, batchSaveDocuments, COLLECTIONS } from "../lib/firebase";
+import { saveDocument, deleteDocument, batchSaveDocuments, buildSafeDocId, COLLECTIONS } from "../lib/firebase";
 import { 
   notifySimpanSuccess, 
   notifySimpanError, 
@@ -54,6 +54,7 @@ export const InputAbsensiView: React.FC<InputAbsensiViewProps> = ({
   const [manualScanNisn, setManualScanNisn] = useState<string>("");
   const isScanningRef = useRef<boolean>(false);
   const activeStreamRef = useRef<MediaStream | null>(null);
+  const lastScannedRef = useRef<{ code: string; time: number }>({ code: "", time: 0 });
 
   const kelasOptions = Array.from(new Set(siswaList.map((s) => s.kelas).filter(Boolean))).sort();
   const studentsInClass = siswaList.filter((s) => s.kelas === selectedKelas);
@@ -109,7 +110,7 @@ export const InputAbsensiView: React.FC<InputAbsensiViewProps> = ({
     const bln = yearMonth[1] || "01";
 
     const itemsToSave: LogAbsensi[] = studentsInClass.map((s) => {
-      const docId = `${tanggal}_${selectedKelas}_${selectedMapel}_${s.id}`;
+      const docId = buildSafeDocId(tanggal, selectedKelas, selectedMapel, s.id);
       return {
         id: docId,
         waktu: tanggal,
@@ -142,8 +143,26 @@ export const InputAbsensiView: React.FC<InputAbsensiViewProps> = ({
   // Save Edited Absensi Item
   const handleSaveEditedAbsensi = async (id: string) => {
     if (!editAbsensiData) return;
+    const targetTanggal = (editAbsensiData.tanggal || editAbsensiData.waktu || "").trim();
+    if (!targetTanggal || !editAbsensiData.kelas?.trim() || !editAbsensiData.mapel?.trim() || !editAbsensiData.namaSiswa?.trim()) {
+      notifyEditError("Tanggal, Kelas, Mata Pelajaran, dan Nama Siswa wajib diisi.");
+      return;
+    }
+
+    const parts = targetTanggal.split("-");
+    const payloadToSave: LogAbsensi = {
+      ...editAbsensiData,
+      tanggal: targetTanggal,
+      waktu: targetTanggal,
+      bulan: parts[1] || editAbsensiData.bulan || "01",
+      tahun: parts[0] || editAbsensiData.tahun || "2026",
+      kelas: editAbsensiData.kelas.trim(),
+      mapel: editAbsensiData.mapel.trim(),
+      namaSiswa: editAbsensiData.namaSiswa.trim()
+    };
+
     try {
-      await saveDocument(COLLECTIONS.LOG_ABSENSI, id, editAbsensiData);
+      await saveDocument(COLLECTIONS.LOG_ABSENSI, id, payloadToSave);
       setEditingAbsensiId(null);
       setEditAbsensiData(null);
       notifyEditSuccess("Data absensi berhasil diperbarui!");
@@ -183,7 +202,7 @@ export const InputAbsensiView: React.FC<InputAbsensiViewProps> = ({
   const countAlpa = filteredAbsensiList.filter((a) => a.status === "Alpa").length;
 
   // Manual Scan Submit
-  const handleManualScanSubmit = (e: React.FormEvent) => {
+  const handleManualScanSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualScanNisn.trim()) return;
 
@@ -191,26 +210,35 @@ export const InputAbsensiView: React.FC<InputAbsensiViewProps> = ({
     const matched = siswaList.find((s) => s.nisn === val || s.id === val);
 
     if (matched) {
-      setAttendanceState((prev) => ({ ...prev, [matched.id]: "Hadir" }));
-      const statusText = `BERHASIL: ${matched.nama} (NISN: ${matched.nisn}) -> HADIR`;
-      setScanStatus(statusText);
-      notifySimpanSuccess(statusText);
+      const targetKelas = selectedKelas || matched.kelas;
+      const targetMapel = selectedMapel || "Absensi QR";
+      const docId = buildSafeDocId(tanggal, targetKelas, targetMapel, matched.id);
+      const dateParts = tanggal.split("-");
 
-      const docId = `${tanggal}_${selectedKelas || matched.kelas}_${selectedMapel || 'Scan'}_${matched.id}`;
-      saveDocument(COLLECTIONS.LOG_ABSENSI, docId, {
-        id: docId,
-        waktu: tanggal,
-        tanggal: tanggal,
-        kelas: selectedKelas || matched.kelas,
-        mapel: selectedMapel || "Absensi QR",
-        idSiswa: matched.id,
-        namaSiswa: matched.nama,
-        status: "Hadir",
-        bulan: tanggal.split("-")[1] || "01",
-        tahun: tanggal.split("-")[0] || "2026",
-        namaGuru: config.Nama_Guru || "Guru"
-      });
-      setManualScanNisn("");
+      try {
+        await saveDocument(COLLECTIONS.LOG_ABSENSI, docId, {
+          id: docId,
+          waktu: tanggal,
+          tanggal: tanggal,
+          kelas: targetKelas,
+          mapel: targetMapel,
+          idSiswa: matched.id,
+          namaSiswa: matched.nama,
+          status: "Hadir",
+          bulan: dateParts[1] || "01",
+          tahun: dateParts[0] || "2026",
+          namaGuru: config.Nama_Guru || "Guru"
+        });
+        setAttendanceState((prev) => ({ ...prev, [matched.id]: "Hadir" }));
+        const statusText = `BERHASIL: ${matched.nama} (NISN: ${matched.nisn}) -> HADIR`;
+        setScanStatus(statusText);
+        notifySimpanSuccess(statusText);
+        setManualScanNisn("");
+      } catch (err: any) {
+        const errText = err?.message || "Gagal menyimpan presensi scan NISN ke Firebase.";
+        setScanStatus(errText);
+        notifySimpanError(errText);
+      }
     } else {
       const errorText = `NISN/Kode '${val}' tidak ditemukan dalam database siswa.`;
       setScanStatus(errorText);
@@ -319,32 +347,49 @@ export const InputAbsensiView: React.FC<InputAbsensiViewProps> = ({
 
         if (code && code.data) {
           const codeVal = code.data.trim();
-          const matchedSiswa = siswaList.find(
-            (s) => s.nisn === codeVal || s.id === codeVal
-          );
+          const now = Date.now();
+          const isDuplicateRecent =
+            lastScannedRef.current.code === codeVal &&
+            now - lastScannedRef.current.time < 3000;
 
-          if (matchedSiswa) {
-            setAttendanceState((prev) => ({ ...prev, [matchedSiswa.id]: "Hadir" }));
-            const successText = `BERHASIL: ${matchedSiswa.nama} (NISN: ${matchedSiswa.nisn}) -> HADIR`;
-            setScanStatus(successText);
-            setStatusMsg({ type: "success", text: successText });
+          if (!isDuplicateRecent) {
+            const matchedSiswa = siswaList.find(
+              (s) => s.nisn === codeVal || s.id === codeVal
+            );
 
-            const docId = `${tanggal}_${selectedKelas || matchedSiswa.kelas}_${selectedMapel || 'Scan'}_${matchedSiswa.id}`;
-            saveDocument(COLLECTIONS.LOG_ABSENSI, docId, {
-              id: docId,
-              waktu: tanggal,
-              tanggal: tanggal,
-              kelas: selectedKelas || matchedSiswa.kelas,
-              mapel: selectedMapel || "Scan QR",
-              idSiswa: matchedSiswa.id,
-              namaSiswa: matchedSiswa.nama,
-              status: "Hadir",
-              bulan: tanggal.split("-")[1] || "01",
-              tahun: tanggal.split("-")[0] || "2026",
-              namaGuru: config.Nama_Guru || "Guru"
-            });
-          } else {
-            setScanStatus(`QR Terbaca: '${codeVal}' (Data siswa tidak ditemukan)`);
+            if (matchedSiswa) {
+              lastScannedRef.current = { code: codeVal, time: now };
+              const targetKelas = selectedKelas || matchedSiswa.kelas;
+              const targetMapel = selectedMapel || "Scan QR";
+              const docId = buildSafeDocId(tanggal, targetKelas, targetMapel, matchedSiswa.id);
+              const dateParts = tanggal.split("-");
+
+              setAttendanceState((prev) => ({ ...prev, [matchedSiswa.id]: "Hadir" }));
+              const successText = `BERHASIL: ${matchedSiswa.nama} (NISN: ${matchedSiswa.nisn}) -> HADIR`;
+              setScanStatus(successText);
+              setStatusMsg({ type: "success", text: successText });
+
+              void saveDocument(COLLECTIONS.LOG_ABSENSI, docId, {
+                id: docId,
+                waktu: tanggal,
+                tanggal: tanggal,
+                kelas: targetKelas,
+                mapel: targetMapel,
+                idSiswa: matchedSiswa.id,
+                namaSiswa: matchedSiswa.nama,
+                status: "Hadir",
+                bulan: dateParts[1] || "01",
+                tahun: dateParts[0] || "2026",
+                namaGuru: config.Nama_Guru || "Guru"
+              }).catch((err: any) => {
+                const errMsg = err?.message || "Gagal menyimpan presensi QR ke Firebase.";
+                setStatusMsg({ type: "error", text: errMsg });
+                setScanStatus(errMsg);
+              });
+            } else {
+              lastScannedRef.current = { code: codeVal, time: now };
+              setScanStatus(`QR Terbaca: '${codeVal}' (Data siswa tidak ditemukan)`);
+            }
           }
         }
       }

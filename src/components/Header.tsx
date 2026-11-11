@@ -9,6 +9,7 @@ interface HeaderProps {
   onSetDarkMode: (isDark: boolean) => void;
   onToggleDarkMode?: () => void;
   isConnected: boolean;
+  connectionError?: string | null;
   config: Pengaturan;
   onLogout?: () => void;
 }
@@ -38,6 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSetDarkMode,
   onToggleDarkMode,
   isConnected,
+  connectionError,
   config,
   onLogout
 }) => {
@@ -108,9 +110,12 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="flex items-center space-x-1 sm:space-x-2 shrink-0 ml-1">
         {/* Firebase Live Status Badge */}
         <div
+          title={connectionError || undefined}
           className={`hidden min-[480px]:flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1 rounded-full text-[10px] sm:text-[11px] font-bold shadow-xs transition-colors shrink-0 ${
             isConnected
               ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
+              : connectionError
+              ? "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300 border border-red-200 dark:border-red-800"
               : "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
           }`}
         >
@@ -118,6 +123,11 @@ export const Header: React.FC<HeaderProps> = ({
             <>
               <CloudCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <span>Firebase Live</span>
+            </>
+          ) : connectionError ? (
+            <>
+              <CloudOff className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" />
+              <span>Koneksi Gagal</span>
             </>
           ) : (
             <>

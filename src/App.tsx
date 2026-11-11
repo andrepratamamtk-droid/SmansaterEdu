@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   PieChart, 
   GraduationCap, 
@@ -17,7 +17,9 @@ import {
   X,
   SlidersHorizontal,
   FileQuestion,
-  Compass
+  Compass,
+  AlertCircle,
+  RefreshCw
 } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { Header } from "./components/Header";
@@ -41,13 +43,15 @@ import { ResetDatabaseView } from "./components/ResetDatabaseView";
 import { LoginView } from "./components/LoginView";
 
 import { 
+  auth,
+  getFirebaseConnectionInfo,
+  verifyFirestoreConnection,
   subscribeCollection, 
   subscribePengaturan, 
   batchSaveDocuments, 
   savePengaturan,
   logOut,
   onAuthUserChanged,
-  getCurrentUserUid,
   COLLECTIONS 
 } from "./lib/firebase";
 
@@ -99,10 +103,9 @@ const LAPORAN_ITEMS = [
 ];
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return Boolean(localStorage.getItem("edadmin_auth_token"));
-  });
-  const [currentUid, setCurrentUid] = useState<string>(() => getCurrentUserUid());
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUid, setCurrentUid] = useState("");
   const [activeTab, setActiveTab] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeCategorySheet, setActiveCategorySheet] = useState<"akademik" | "ai" | "laporan" | null>(null);
@@ -110,6 +113,24 @@ export default function App() {
     return localStorage.getItem("edadmin_theme") === "dark";
   });
   const [isConnected, setIsConnected] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
+  const [loadedState, setLoadedState] = useState<{
+    uid: string;
+    siswa: boolean;
+    mapel: boolean;
+    jadwal: boolean;
+    pengaturan: boolean;
+    pengaturanExists: boolean;
+  }>({
+    uid: "",
+    siswa: false,
+    mapel: false,
+    jadwal: false,
+    pengaturan: false,
+    pengaturanExists: false
+  });
+  const seededUidsRef = useRef<Set<string>>(new Set());
 
   // Sync dark class on documentElement and body for Tailwind CSS theme switching
   useEffect(() => {
@@ -135,28 +156,55 @@ export default function App() {
   const [bimbinganList, setBimbinganList] = useState<BimbinganWali[]>([]);
   const [config, setConfig] = useState<Pengaturan>(DEFAULT_CONFIG);
 
-  // Listen to Firebase Auth state changes
+  // Listen to Firebase Auth state changes and wait for initial session resolution
   useEffect(() => {
     const unsub = onAuthUserChanged((user) => {
       if (user) {
         setCurrentUid(user.uid);
         setIsAuthenticated(true);
+        setConnectionError(null);
       } else {
-        const storedUid = getCurrentUserUid();
-        setCurrentUid(storedUid);
-        if (!localStorage.getItem("edadmin_auth_token")) {
-          setIsAuthenticated(false);
-        }
+        setCurrentUid("");
+        setIsAuthenticated(false);
+        setIsConnected(false);
+        setConnectionError(null);
+        setSiswaList([]);
+        setMapelList([]);
+        setJadwalList([]);
+        setAbsensiList([]);
+        setNilaiList([]);
+        setAgendaList([]);
+        setSiswaBimbinganList([]);
+        setBimbinganList([]);
+        setConfig(DEFAULT_CONFIG);
+        setLoadedState({
+          uid: "",
+          siswa: false,
+          mapel: false,
+          jadwal: false,
+          pengaturan: false,
+          pengaturanExists: false
+        });
       }
+      setIsAuthReady(true);
     });
     return () => unsub();
   }, []);
 
   // Subscribe to Firebase real-time collections for the active Google account UID
   useEffect(() => {
-    if (!isAuthenticated || !currentUid) return;
+    if (!isAuthReady || !isAuthenticated || !currentUid) return;
+
+    const fbInfo = getFirebaseConnectionInfo();
+    if (!fbInfo.isConfigured) {
+      setIsConnected(false);
+      setConnectionError("Konfigurasi Firebase belum lengkap. Periksa firebase-applet-config.json atau variabel environment Firebase Anda.");
+      return;
+    }
 
     // Reset current lists while switching / fetching user database
+    setIsConnected(false);
+    setConnectionError(null);
     setSiswaList([]);
     setMapelList([]);
     setJadwalList([]);
@@ -165,44 +213,97 @@ export default function App() {
     setAgendaList([]);
     setSiswaBimbinganList([]);
     setBimbinganList([]);
+    setLoadedState({
+      uid: currentUid,
+      siswa: false,
+      mapel: false,
+      jadwal: false,
+      pengaturan: false,
+      pengaturanExists: false
+    });
 
-    let unsubs: Array<() => void> = [];
+    if (retryNonce > 0) {
+      void verifyFirestoreConnection().then((res) => {
+        if (!res.reachable && res.error) {
+          setConnectionError("Tidak dapat menjangkau server Firebase. Periksa koneksi internet Anda lalu coba lagi.");
+        }
+      });
+    }
+
+    const handleSubError = (err: Error) => {
+      let msg = "Gagal terhubung ke Firebase Cloud Firestore.";
+      try {
+        const parsed = JSON.parse(err.message);
+        const raw = String(parsed?.error || err.message);
+        if (raw.includes("Missing or insufficient permissions")) {
+          msg = "Akses Firestore ditolak. Pastikan Anda login dengan Akun Google terverifikasi dan aturan keamanan aktif.";
+        } else if (raw.includes("Quota exceeded")) {
+          msg = "Kuota harian Firestore gratis (Spark Plan) telah tercapai. Kuota akan direset esok hari.";
+        } else if (raw.includes("the client is offline") || raw.includes("network")) {
+          msg = "Tidak dapat menjangkau server Firebase. Periksa koneksi internet Anda lalu coba lagi.";
+        } else if (raw) {
+          msg = `Koneksi Firestore bermasalah: ${raw}`;
+        }
+      } catch {
+        if (err?.message) msg = err.message;
+      }
+      setConnectionError(msg);
+      setIsConnected(false);
+    };
+
+    const markConnected = () => {
+      setIsConnected(true);
+      setConnectionError(null);
+    };
+
+    const unsubs: Array<() => void> = [];
 
     unsubs.push(subscribeCollection<Siswa>(COLLECTIONS.SISWA, (data) => {
       setSiswaList(data);
-      setIsConnected(true);
-    }, currentUid));
+      markConnected();
+      setLoadedState((prev) => ({ ...prev, uid: currentUid, siswa: true }));
+    }, currentUid, handleSubError));
 
     unsubs.push(subscribeCollection<Mapel>(COLLECTIONS.MAPEL, (data) => {
       setMapelList(data);
-    }, currentUid));
+      markConnected();
+      setLoadedState((prev) => ({ ...prev, uid: currentUid, mapel: true }));
+    }, currentUid, handleSubError));
 
     unsubs.push(subscribeCollection<Jadwal>(COLLECTIONS.JADWAL, (data) => {
       setJadwalList(data);
-    }, currentUid));
+      markConnected();
+      setLoadedState((prev) => ({ ...prev, uid: currentUid, jadwal: true }));
+    }, currentUid, handleSubError));
 
     unsubs.push(subscribeCollection<LogAbsensi>(COLLECTIONS.LOG_ABSENSI, (data) => {
       setAbsensiList(data);
-    }, currentUid));
+      markConnected();
+    }, currentUid, handleSubError));
 
     unsubs.push(subscribeCollection<DataNilai>(COLLECTIONS.DATA_NILAI, (data) => {
       setNilaiList(data);
-    }, currentUid));
+      markConnected();
+    }, currentUid, handleSubError));
 
     unsubs.push(subscribeCollection<JurnalAgenda>(COLLECTIONS.JURNAL_AGENDA, (data) => {
       setAgendaList(data);
-    }, currentUid));
+      markConnected();
+    }, currentUid, handleSubError));
 
     unsubs.push(subscribeCollection<SiswaBimbingan>(COLLECTIONS.SISWA_BIMBINGAN, (data) => {
       setSiswaBimbinganList(data);
-    }, currentUid));
+      markConnected();
+    }, currentUid, handleSubError));
 
     unsubs.push(subscribeCollection<BimbinganWali>(COLLECTIONS.BIMBINGAN_WALI, (data) => {
       setBimbinganList(data);
-    }, currentUid));
+      markConnected();
+    }, currentUid, handleSubError));
 
-    unsubs.push(subscribePengaturan((cfg) => {
-      if (cfg && Object.keys(cfg).length > 0) {
+    unsubs.push(subscribePengaturan((cfg, exists) => {
+      markConnected();
+      if (exists && cfg && Object.keys(cfg).length > 0) {
         // Automatically sync legacy placeholder config to requested defaults
         const updatedCfg = { ...cfg };
         if (updatedCfg.Nama_Sekolah === "SMP NEGERI 3 KERINCI" || !updatedCfg.Nama_Sekolah) {
@@ -228,77 +329,111 @@ export default function App() {
         }
         setConfig((prev) => ({ ...prev, ...updatedCfg }));
       }
-    }, currentUid));
+      setLoadedState((prev) => ({
+        ...prev,
+        uid: currentUid,
+        pengaturan: true,
+        pengaturanExists: exists
+      }));
+    }, currentUid, handleSubError));
 
     return () => {
       unsubs.forEach((unsub) => unsub());
     };
-  }, [isAuthenticated, currentUid]);
+  }, [isAuthReady, isAuthenticated, currentUid, retryNonce]);
 
-  // Seed initial sample data for new user if user's database is empty
+  // Seed initial sample data once all primary snapshots resolve for a new user
   useEffect(() => {
-    if (!isAuthenticated || !currentUid) return;
+    if (
+      !isAuthReady ||
+      !isAuthenticated ||
+      !currentUid ||
+      !isConnected ||
+      loadedState.uid !== currentUid ||
+      !loadedState.siswa ||
+      !loadedState.mapel ||
+      !loadedState.jadwal ||
+      !loadedState.pengaturan
+    ) {
+      return;
+    }
+
+    if (seededUidsRef.current.has(currentUid)) {
+      return;
+    }
+    seededUidsRef.current.add(currentUid);
 
     const seedInitialData = async () => {
-      // Do not re-seed sample data if database was explicitly cleared/wiped by this user
-      if (
-        localStorage.getItem(`edadmin_database_cleared_${currentUid}`) === "true" ||
-        config?.isDatabaseCleared === true
-      ) {
-        return;
-      }
+      try {
+        const isCleared =
+          localStorage.getItem(`edadmin_database_cleared_${currentUid}`) === "true" ||
+          config?.isDatabaseCleared === true;
 
-      // Seed Siswa if empty
-      if (siswaList.length === 0 && isConnected) {
-        const sampleSiswa: Siswa[] = [
-          { id: "1001", nisn: "0012345678", nama: "Ahmad Fulan", kelas: "X A" },
-          { id: "1002", nisn: "0012345679", nama: "Siti Aminah", kelas: "X A" },
-          { id: "1003", nisn: "0012345680", nama: "Budi Pratama", kelas: "X B" },
-          { id: "1004", nisn: "0012345681", nama: "Rizky Febrian", kelas: "X B" }
-        ];
-        await batchSaveDocuments(COLLECTIONS.SISWA, sampleSiswa, currentUid);
-      }
-
-      // Seed Mapel if empty
-      if (mapelList.length === 0 && isConnected) {
-        const sampleMapel: Mapel[] = [
-          { id: "m1", namaMapel: "Pendidikan Pancasila", semester: "Ganjil", tahunAjaran: "2026/2027" },
-          { id: "m2", namaMapel: "Bahasa Indonesia", semester: "Ganjil", tahunAjaran: "2026/2027" },
-          { id: "m3", namaMapel: "Matematika", semester: "Ganjil", tahunAjaran: "2026/2027" },
-          { id: "m4", namaMapel: "Sejarah", semester: "Ganjil", tahunAjaran: "2026/2027" }
-        ];
-        await batchSaveDocuments(COLLECTIONS.MAPEL, sampleMapel, currentUid);
-      }
-
-      // Seed Jadwal if empty
-      if (jadwalList.length === 0 && isConnected) {
-        const sampleJadwal: Jadwal[] = [
-          { id: "j1", hari: "Senin", jam: "07:30 - 09:00", kelas: "X A", mapel: "Pendidikan Pancasila" },
-          { id: "j2", hari: "Selasa", jam: "09:15 - 10:45", kelas: "X B", mapel: "Pendidikan Pancasila" }
-        ];
-        await batchSaveDocuments(COLLECTIONS.JADWAL, sampleJadwal, currentUid);
-      }
-
-      // Save initial config personalized to Google account if empty
-      if (!config.Nama_Guru && isConnected) {
-        let defaultName = DEFAULT_CONFIG.Nama_Guru;
-        try {
-          const userRaw = localStorage.getItem("edadmin_user");
-          if (userRaw) {
-            const userObj = JSON.parse(userRaw);
-            if (userObj.name) defaultName = userObj.name;
+        if (!isCleared) {
+          if (siswaList.length === 0) {
+            const sampleSiswa: Siswa[] = [
+              { id: "1001", nisn: "0012345678", nama: "Ahmad Fulan", kelas: "X A" },
+              { id: "1002", nisn: "0012345679", nama: "Siti Aminah", kelas: "X A" },
+              { id: "1003", nisn: "0012345680", nama: "Budi Pratama", kelas: "X B" },
+              { id: "1004", nisn: "0012345681", nama: "Rizky Febrian", kelas: "X B" }
+            ];
+            await batchSaveDocuments(COLLECTIONS.SISWA, sampleSiswa, currentUid);
           }
-        } catch {}
 
-        await savePengaturan({
-          ...DEFAULT_CONFIG,
-          Nama_Guru: defaultName
-        }, currentUid);
+          if (mapelList.length === 0) {
+            const sampleMapel: Mapel[] = [
+              { id: "m1", namaMapel: "Pendidikan Pancasila", semester: "Ganjil", tahunAjaran: "2026/2027" },
+              { id: "m2", namaMapel: "Bahasa Indonesia", semester: "Ganjil", tahunAjaran: "2026/2027" },
+              { id: "m3", namaMapel: "Matematika", semester: "Ganjil", tahunAjaran: "2026/2027" },
+              { id: "m4", namaMapel: "Sejarah", semester: "Ganjil", tahunAjaran: "2026/2027" }
+            ];
+            await batchSaveDocuments(COLLECTIONS.MAPEL, sampleMapel, currentUid);
+          }
+
+          if (jadwalList.length === 0) {
+            const sampleJadwal: Jadwal[] = [
+              { id: "j1", hari: "Senin", jam: "07:30 - 09:00", kelas: "X A", mapel: "Pendidikan Pancasila" },
+              { id: "j2", hari: "Selasa", jam: "09:15 - 10:45", kelas: "X B", mapel: "Pendidikan Pancasila" }
+            ];
+            await batchSaveDocuments(COLLECTIONS.JADWAL, sampleJadwal, currentUid);
+          }
+        }
+
+        // Save initial config personalized to Google account if config doc does not exist yet
+        if (!loadedState.pengaturanExists) {
+          let defaultName = auth.currentUser?.displayName || DEFAULT_CONFIG.Nama_Guru;
+          try {
+            const userRaw = localStorage.getItem("edadmin_user");
+            if (userRaw) {
+              const userObj = JSON.parse(userRaw);
+              if (userObj.name) defaultName = userObj.name;
+            }
+          } catch {}
+
+          await savePengaturan({
+            ...DEFAULT_CONFIG,
+            Nama_Guru: defaultName,
+            ...(isCleared ? { isDatabaseCleared: true } : {})
+          }, currentUid);
+        }
+      } catch (err) {
+        console.error("Initial seed notice:", err);
+        seededUidsRef.current.delete(currentUid);
       }
     };
 
-    seedInitialData();
-  }, [isAuthenticated, currentUid, isConnected, siswaList.length, mapelList.length, jadwalList.length, config.Nama_Guru, config.isDatabaseCleared]);
+    void seedInitialData();
+  }, [
+    isAuthReady,
+    isAuthenticated,
+    currentUid,
+    isConnected,
+    loadedState,
+    siswaList.length,
+    mapelList.length,
+    jadwalList.length,
+    config.isDatabaseCleared
+  ]);
 
   const handleSuccessReset = () => {
     if (currentUid) {
@@ -325,14 +460,33 @@ export default function App() {
     setAgendaList([]);
     setSiswaBimbinganList([]);
     setBimbinganList([]);
+    setConfig(DEFAULT_CONFIG);
+    setCurrentUid("");
     setIsConnected(false);
+    setConnectionError(null);
     setIsAuthenticated(false);
   };
+
+  if (!isAuthReady) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans ${isDarkMode ? "dark" : ""}`}>
+        <div className="flex flex-col items-center space-y-3 p-6">
+          <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm font-bold text-slate-600 dark:text-slate-300">Menghubungkan sesi akun Google...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return (
       <LoginView
-        onLoginSuccess={() => setIsAuthenticated(true)}
+        onLoginSuccess={() => {
+          if (auth.currentUser) {
+            setCurrentUid(auth.currentUser.uid);
+          }
+          setIsAuthenticated(true);
+        }}
         isDarkMode={isDarkMode}
         onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
       />
@@ -358,6 +512,7 @@ export default function App() {
           onSetDarkMode={(isDark) => setIsDarkMode(isDark)}
           onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
           isConnected={isConnected}
+          connectionError={connectionError}
           config={config}
           onLogout={handleLogout}
         />
@@ -460,6 +615,35 @@ export default function App() {
         )}
 
         <main className="flex-1 overflow-y-auto p-3 sm:p-4 lg:p-8 custom-scrollbar pb-24 lg:pb-8">
+          {connectionError && !isConnected && (
+            <div className="mb-4 max-w-2xl mx-auto p-4 rounded-2xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-start space-x-2.5">
+                <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold">Koneksi Database Firebase Terkendala</p>
+                  <p className="mt-0.5 leading-relaxed opacity-90">{connectionError}</p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setRetryNonce((n) => n + 1)}
+                  className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold flex items-center space-x-1 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Muat Ulang</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 font-bold cursor-pointer"
+                >
+                  Masuk Ulang
+                </button>
+              </div>
+            </div>
+          )}
+
           {activeTab === "dashboard" && (
             <DashboardView
               siswaList={siswaList}

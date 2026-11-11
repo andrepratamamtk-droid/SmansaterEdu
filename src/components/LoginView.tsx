@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { GraduationCap, ShieldCheck, AlertCircle, Sun, Moon, Sparkles, CheckCircle2, Database, Lock, ArrowRight, UserCheck } from "lucide-react";
-import { signInWithGoogle } from "../lib/firebase";
+import { signInWithGoogle, getFirebaseConnectionInfo } from "../lib/firebase";
 
 interface LoginViewProps {
   onLoginSuccess: () => void;
@@ -14,9 +14,17 @@ export const LoginView: React.FC<LoginViewProps> = ({
   onToggleDarkMode,
 }) => {
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(() =>
+    getFirebaseConnectionInfo().isConfigured
+      ? null
+      : "Konfigurasi Firebase belum lengkap. Pastikan firebase-applet-config.json atau variabel environment Firebase tersedia."
+  );
 
   const handleGoogleSignIn = async () => {
+    if (!getFirebaseConnectionInfo().isConfigured) {
+      setErrorMsg("Konfigurasi Firebase belum lengkap. Silakan lengkapi firebase-applet-config.json terlebih dahulu.");
+      return;
+    }
     setGoogleLoading(true);
     setErrorMsg(null);
     try {
@@ -30,6 +38,15 @@ export const LoginView: React.FC<LoginViewProps> = ({
         setErrorMsg("Jendela login Google ditutup sebelum selesai. Silakan coba klik tombol login kembali.");
       } else if (err?.code === "auth/cancelled-popup-request") {
         setErrorMsg("Proses autentikasi Google dibatalkan.");
+      } else if (err?.code === "auth/popup-blocked") {
+        setErrorMsg("Popup login Google diblokir oleh browser. Izinkan pop-up untuk situs ini lalu coba masuk lagi.");
+      } else if (err?.code === "auth/unauthorized-domain") {
+        const currentHost = typeof window !== "undefined" ? window.location.hostname : "domain ini";
+        setErrorMsg(
+          `Domain "${currentHost}" belum masuk Authorized Domains di Firebase Authentication. Tambahkan domain tersebut pada Firebase Console → Authentication → Settings → Authorized domains.`
+        );
+      } else if (err?.code === "auth/operation-not-allowed") {
+        setErrorMsg("Provider login Google belum diaktifkan di Firebase Console → Authentication → Sign-in method.");
       } else if (err?.code === "auth/network-request-failed") {
         setErrorMsg("Koneksi jaringan terputus. Pastikan perangkat Anda terhubung ke internet.");
       } else {

@@ -1,9 +1,299 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny Catch-All)
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // Shared Hardened Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    function isValidNonEmptyStr(val, maxLen) {
+      return val is string && val.size() >= 1 && val.size() <= maxLen;
+    }
+
+    function isValidOptStr(val, maxLen) {
+      return val is string && val.size() <= maxLen;
+    }
+
+    // Entity Validation Helpers (Synchronized with firebase-blueprint.json)
+
+    function isValidSiswa(data, docId, userId) {
+      return data.keys().hasAll(['id', 'nisn', 'nama', 'kelas', 'userUid', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'nisn', 'nama', 'kelas', 'userUid', 'updatedAt'])
+        && isValidId(data.id) && data.id == docId
+        && isValidNonEmptyStr(data.nisn, 50)
+        && isValidNonEmptyStr(data.nama, 200)
+        && isValidNonEmptyStr(data.kelas, 50)
+        && isValidId(data.userUid) && data.userUid == userId
+        && data.updatedAt == request.time;
+    }
+
+    function isValidMapel(data, docId, userId) {
+      return data.keys().hasAll(['id', 'namaMapel', 'semester', 'tahunAjaran', 'userUid', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'namaMapel', 'semester', 'tahunAjaran', 'userUid', 'updatedAt'])
+        && isValidId(data.id) && data.id == docId
+        && isValidNonEmptyStr(data.namaMapel, 200)
+        && (data.semester is string && data.semester.size() <= 30 && data.semester in ['Ganjil', 'Genap'])
+        && isValidNonEmptyStr(data.tahunAjaran, 30)
+        && isValidId(data.userUid) && data.userUid == userId
+        && data.updatedAt == request.time;
+    }
+
+    function isValidJadwal(data, docId, userId) {
+      return data.keys().hasAll(['id', 'hari', 'jam', 'kelas', 'mapel', 'userUid', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'hari', 'jam', 'kelas', 'mapel', 'userUid', 'updatedAt'])
+        && isValidId(data.id) && data.id == docId
+        && (data.hari is string && data.hari.size() <= 20 && data.hari in ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'])
+        && isValidNonEmptyStr(data.jam, 50)
+        && isValidNonEmptyStr(data.kelas, 50)
+        && isValidNonEmptyStr(data.mapel, 200)
+        && isValidId(data.userUid) && data.userUid == userId
+        && data.updatedAt == request.time;
+    }
+
+    function isValidLogAbsensi(data, docId, userId) {
+      return data.keys().hasAll(['id', 'waktu', 'tanggal', 'kelas', 'mapel', 'idSiswa', 'namaSiswa', 'status', 'bulan', 'tahun', 'namaGuru', 'userUid', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'waktu', 'tanggal', 'kelas', 'mapel', 'idSiswa', 'namaSiswa', 'status', 'bulan', 'tahun', 'namaGuru', 'userUid', 'updatedAt'])
+        && isValidId(data.id) && data.id == docId
+        && isValidNonEmptyStr(data.waktu, 30)
+        && isValidNonEmptyStr(data.tanggal, 30)
+        && isValidNonEmptyStr(data.kelas, 50)
+        && isValidNonEmptyStr(data.mapel, 200)
+        && isValidId(data.idSiswa)
+        && isValidNonEmptyStr(data.namaSiswa, 200)
+        && (data.status is string && data.status.size() <= 20 && data.status in ['Hadir', 'Izin', 'Sakit', 'Alpa'])
+        && isValidNonEmptyStr(data.bulan, 20)
+        && isValidNonEmptyStr(data.tahun, 20)
+        && isValidNonEmptyStr(data.namaGuru, 200)
+        && isValidId(data.userUid) && data.userUid == userId
+        && data.updatedAt == request.time;
+    }
+
+    function isValidDataNilai(data, docId, userId) {
+      return data.keys().hasAll(['id', 'waktu', 'jenis', 'mapel', 'kelas', 'idSiswa', 'namaSiswa', 'nilai', 'namaGuru', 'userUid', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'waktu', 'jenis', 'mapel', 'kelas', 'idSiswa', 'namaSiswa', 'nilai', 'namaGuru', 'userUid', 'updatedAt'])
+        && isValidId(data.id) && data.id == docId
+        && isValidOptStr(data.waktu, 30)
+        && isValidNonEmptyStr(data.jenis, 100)
+        && isValidNonEmptyStr(data.mapel, 200)
+        && isValidNonEmptyStr(data.kelas, 50)
+        && isValidId(data.idSiswa)
+        && isValidNonEmptyStr(data.namaSiswa, 200)
+        && ((data.nilai is number && data.nilai >= 0 && data.nilai <= 100) || (data.nilai is string && data.nilai == ''))
+        && isValidNonEmptyStr(data.namaGuru, 200)
+        && isValidId(data.userUid) && data.userUid == userId
+        && data.updatedAt == request.time;
+    }
+
+    function isValidJurnalAgenda(data, docId, userId) {
+      return data.keys().hasAll(['id', 'tanggal', 'jam', 'kelas', 'mapel', 'materi', 'status', 'absenSiswa', 'namaGuru', 'userUid', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'tanggal', 'jam', 'kelas', 'mapel', 'materi', 'status', 'absenSiswa', 'ket', 'namaGuru', 'userUid', 'updatedAt'])
+        && isValidId(data.id) && data.id == docId
+        && isValidNonEmptyStr(data.tanggal, 30)
+        && isValidNonEmptyStr(data.jam, 50)
+        && isValidNonEmptyStr(data.kelas, 50)
+        && isValidNonEmptyStr(data.mapel, 200)
+        && isValidNonEmptyStr(data.materi, 2000)
+        && (data.status is string && data.status.size() <= 50 && data.status in ['Terlaksana', 'Tunda'])
+        && isValidOptStr(data.absenSiswa, 500)
+        && (!('ket' in data) || isValidOptStr(data.ket, 1000))
+        && isValidNonEmptyStr(data.namaGuru, 200)
+        && isValidId(data.userUid) && data.userUid == userId
+        && data.updatedAt == request.time;
+    }
+
+    function isValidSiswaBimbingan(data, docId, userId) {
+      return data.keys().hasAll(['id', 'namaSiswa', 'kelas', 'userUid', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'namaSiswa', 'kelas', 'userUid', 'updatedAt'])
+        && isValidId(data.id) && data.id == docId
+        && isValidNonEmptyStr(data.namaSiswa, 200)
+        && isValidNonEmptyStr(data.kelas, 50)
+        && isValidId(data.userUid) && data.userUid == userId
+        && data.updatedAt == request.time;
+    }
+
+    function isValidBimbinganWali(data, docId, userId) {
+      return data.keys().hasAll(['id', 'tanggal', 'namaSiswa', 'kelas', 'jenis', 'kasus', 'tindakLanjut', 'guruWali', 'userUid', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'tanggal', 'namaSiswa', 'kelas', 'jenis', 'kasus', 'tindakLanjut', 'guruWali', 'userUid', 'updatedAt'])
+        && isValidId(data.id) && data.id == docId
+        && isValidNonEmptyStr(data.tanggal, 30)
+        && isValidNonEmptyStr(data.namaSiswa, 200)
+        && isValidOptStr(data.kelas, 50)
+        && isValidNonEmptyStr(data.jenis, 100)
+        && isValidNonEmptyStr(data.kasus, 2000)
+        && isValidNonEmptyStr(data.tindakLanjut, 2000)
+        && isValidNonEmptyStr(data.guruWali, 200)
+        && isValidId(data.userUid) && data.userUid == userId
+        && data.updatedAt == request.time;
+    }
+
+    function isValidPengaturan(data, userId) {
+      return data.keys().hasAll([
+          'Nama_Guru', 'NIP_Guru', 'Pemerintah', 'Nama_Sekolah', 'Alamat_Sekolah',
+          'Nama_Kepsek', 'NIP_Kepsek', 'Tempat_Tanda_Tangan', 'Logo_Kiri', 'Logo_Kanan',
+          'userUid', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'Nama_Guru', 'NIP_Guru', 'Pemerintah', 'Nama_Sekolah', 'Alamat_Sekolah',
+          'Nama_Kepsek', 'NIP_Kepsek', 'Tempat_Tanda_Tangan', 'Logo_Kiri', 'Logo_Kanan',
+          'username', 'password', 'isDatabaseCleared', 'userUid', 'updatedAt'
+        ])
+        && isValidOptStr(data.Nama_Guru, 200)
+        && isValidOptStr(data.NIP_Guru, 100)
+        && isValidOptStr(data.Pemerintah, 200)
+        && isValidOptStr(data.Nama_Sekolah, 200)
+        && isValidOptStr(data.Alamat_Sekolah, 500)
+        && isValidOptStr(data.Nama_Kepsek, 200)
+        && isValidOptStr(data.NIP_Kepsek, 100)
+        && isValidOptStr(data.Tempat_Tanda_Tangan, 150)
+        && isValidOptStr(data.Logo_Kiri, 400000)
+        && isValidOptStr(data.Logo_Kanan, 400000)
+        && (!('username' in data) || isValidOptStr(data.username, 100))
+        && (!('password' in data) || isValidOptStr(data.password, 100))
+        && (!('isDatabaseCleared' in data) || data.isDatabaseCleared is bool)
+        && isValidId(data.userUid) && data.userUid == userId
+        && data.updatedAt == request.time;
+    }
+
+    // 1. Master Data Siswa
+    match /users/{userId}/data_siswa/{siswaId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId) && isValidId(siswaId) && (resource == null || existing().userUid == userId);
+      allow create: if isOwner(userId) && isValidId(siswaId) && isValidSiswa(incoming(), siswaId, userId);
+      allow update: if isOwner(userId) && isValidId(siswaId) && isValidSiswa(incoming(), siswaId, userId)
+        && incoming().id == existing().id
+        && incoming().userUid == existing().userUid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['nisn', 'nama', 'kelas', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(siswaId) && (resource == null || existing().userUid == userId);
+    }
+
+    // 2. Mata Pelajaran
+    match /users/{userId}/mapel/{mapelId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId) && isValidId(mapelId) && (resource == null || existing().userUid == userId);
+      allow create: if isOwner(userId) && isValidId(mapelId) && isValidMapel(incoming(), mapelId, userId);
+      allow update: if isOwner(userId) && isValidId(mapelId) && isValidMapel(incoming(), mapelId, userId)
+        && incoming().id == existing().id
+        && incoming().userUid == existing().userUid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['namaMapel', 'semester', 'tahunAjaran', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(mapelId) && (resource == null || existing().userUid == userId);
+    }
+
+    // 3. Jadwal Mengajar
+    match /users/{userId}/jadwal/{jadwalId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId) && isValidId(jadwalId) && (resource == null || existing().userUid == userId);
+      allow create: if isOwner(userId) && isValidId(jadwalId) && isValidJadwal(incoming(), jadwalId, userId);
+      allow update: if isOwner(userId) && isValidId(jadwalId) && isValidJadwal(incoming(), jadwalId, userId)
+        && incoming().id == existing().id
+        && incoming().userUid == existing().userUid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['hari', 'jam', 'kelas', 'mapel', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(jadwalId) && (resource == null || existing().userUid == userId);
+    }
+
+    // 4. Log Absensi
+    match /users/{userId}/log_absensi/{absensiId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId) && isValidId(absensiId) && (resource == null || existing().userUid == userId);
+      allow create: if isOwner(userId) && isValidId(absensiId) && isValidLogAbsensi(incoming(), absensiId, userId);
+      allow update: if isOwner(userId) && isValidId(absensiId) && isValidLogAbsensi(incoming(), absensiId, userId)
+        && incoming().id == existing().id
+        && incoming().userUid == existing().userUid
+        && incoming().idSiswa == existing().idSiswa
+        && incoming().diff(existing()).affectedKeys().hasOnly(['waktu', 'tanggal', 'kelas', 'mapel', 'namaSiswa', 'status', 'bulan', 'tahun', 'namaGuru', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(absensiId) && (resource == null || existing().userUid == userId);
+    }
+
+    // 5. Data Nilai
+    match /users/{userId}/data_nilai/{nilaiId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId) && isValidId(nilaiId) && (resource == null || existing().userUid == userId);
+      allow create: if isOwner(userId) && isValidId(nilaiId) && isValidDataNilai(incoming(), nilaiId, userId);
+      allow update: if isOwner(userId) && isValidId(nilaiId) && isValidDataNilai(incoming(), nilaiId, userId)
+        && incoming().id == existing().id
+        && incoming().userUid == existing().userUid
+        && incoming().idSiswa == existing().idSiswa
+        && incoming().diff(existing()).affectedKeys().hasOnly(['waktu', 'jenis', 'mapel', 'kelas', 'namaSiswa', 'nilai', 'namaGuru', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(nilaiId) && (resource == null || existing().userUid == userId);
+    }
+
+    // 6. Jurnal Agenda
+    match /users/{userId}/jurnal_agenda/{agendaId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId) && isValidId(agendaId) && (resource == null || existing().userUid == userId);
+      allow create: if isOwner(userId) && isValidId(agendaId) && isValidJurnalAgenda(incoming(), agendaId, userId);
+      allow update: if isOwner(userId) && isValidId(agendaId) && isValidJurnalAgenda(incoming(), agendaId, userId)
+        && incoming().id == existing().id
+        && incoming().userUid == existing().userUid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['tanggal', 'jam', 'kelas', 'mapel', 'materi', 'status', 'absenSiswa', 'ket', 'namaGuru', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(agendaId) && (resource == null || existing().userUid == userId);
+    }
+
+    // 7. Siswa Bimbingan
+    match /users/{userId}/siswa_bimbingan/{siswaBimbinganId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId) && isValidId(siswaBimbinganId) && (resource == null || existing().userUid == userId);
+      allow create: if isOwner(userId) && isValidId(siswaBimbinganId) && isValidSiswaBimbingan(incoming(), siswaBimbinganId, userId);
+      allow update: if isOwner(userId) && isValidId(siswaBimbinganId) && isValidSiswaBimbingan(incoming(), siswaBimbinganId, userId)
+        && incoming().id == existing().id
+        && incoming().userUid == existing().userUid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['namaSiswa', 'kelas', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(siswaBimbinganId) && (resource == null || existing().userUid == userId);
+    }
+
+    // 8. Bimbingan Wali
+    match /users/{userId}/bimbingan_wali/{bimbinganId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId) && isValidId(bimbinganId) && (resource == null || existing().userUid == userId);
+      allow create: if isOwner(userId) && isValidId(bimbinganId) && isValidBimbinganWali(incoming(), bimbinganId, userId);
+      allow update: if isOwner(userId) && isValidId(bimbinganId) && isValidBimbinganWali(incoming(), bimbinganId, userId)
+        && incoming().id == existing().id
+        && incoming().userUid == existing().userUid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['tanggal', 'namaSiswa', 'kelas', 'jenis', 'kasus', 'tindakLanjut', 'guruWali', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(bimbinganId) && (resource == null || existing().userUid == userId);
+    }
+
+    // 9. Pengaturan (Singleton Doc: config)
+    match /users/{userId}/pengaturan/{configId} {
+      allow list: if false;
+      allow get: if isOwner(userId) && configId == 'config' && (resource == null || existing().userUid == userId);
+      allow create: if isOwner(userId) && configId == 'config' && isValidPengaturan(incoming(), userId);
+      allow update: if isOwner(userId) && configId == 'config' && isValidPengaturan(incoming(), userId)
+        && incoming().userUid == existing().userUid
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'Nama_Guru', 'NIP_Guru', 'Pemerintah', 'Nama_Sekolah', 'Alamat_Sekolah',
+            'Nama_Kepsek', 'NIP_Kepsek', 'Tempat_Tanda_Tangan', 'Logo_Kiri', 'Logo_Kanan',
+            'username', 'password', 'updatedAt'
+          ]) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['isDatabaseCleared', 'updatedAt'])
+        );
+      allow delete: if false;
     }
   }
 }
-

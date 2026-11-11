@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Settings, Save, ShieldCheck, School, UserCheck, Trash2, ShieldAlert, KeyRound, Eye, EyeOff, Globe, Upload, Image as ImageIcon, X, CheckCircle2 } from "lucide-react";
 import { Pengaturan } from "../types";
-import { savePengaturan } from "../lib/firebase";
+import { savePengaturan, MAX_LOGO_LENGTH } from "../lib/firebase";
 import { notifySimpanSuccess, notifySimpanError } from "../lib/swal";
 
 interface PengaturanViewProps {
@@ -68,6 +68,16 @@ export const PengaturanView: React.FC<PengaturanViewProps> = ({ config, onNaviga
     const reader = new FileReader();
     reader.onload = (event) => {
       const src = event.target?.result as string;
+      const applyLogoIfValid = (candidate: string) => {
+        if (candidate.length > MAX_LOGO_LENGTH) {
+          notifySimpanError(`Ukuran ${label} melebihi batas maksimal database (~300KB). Silakan pilih gambar dengan resolusi lebih kecil.`);
+          return false;
+        }
+        setForm((prev) => ({ ...prev, [field]: candidate }));
+        notifySimpanSuccess(`${label} berhasil diunggah!`);
+        return true;
+      };
+
       const img = new Image();
       img.onload = () => {
         const maxDim = 320;
@@ -89,17 +99,17 @@ export const PengaturanView: React.FC<PengaturanViewProps> = ({ config, onNaviga
         if (ctx) {
           ctx.drawImage(img, 0, 0, width, height);
           const mimeType = file.type === "image/png" ? "image/png" : "image/jpeg";
-          const compressed = canvas.toDataURL(mimeType, 0.88);
-          setForm((prev) => ({ ...prev, [field]: compressed }));
-          notifySimpanSuccess(`${label} berhasil diunggah!`);
+          let compressed = canvas.toDataURL(mimeType, 0.88);
+          if (compressed.length > MAX_LOGO_LENGTH) {
+            compressed = canvas.toDataURL("image/jpeg", 0.78);
+          }
+          applyLogoIfValid(compressed);
         } else {
-          setForm((prev) => ({ ...prev, [field]: src }));
-          notifySimpanSuccess(`${label} berhasil diunggah!`);
+          applyLogoIfValid(src);
         }
       };
       img.onerror = () => {
-        setForm((prev) => ({ ...prev, [field]: src }));
-        notifySimpanSuccess(`${label} berhasil diunggah!`);
+        applyLogoIfValid(src);
       };
       img.src = src;
     };

@@ -3,7 +3,8 @@ export interface Siswa {
   nisn: string;
   nama: string;
   kelas: string;
-  updatedAt?: number;
+  userUid?: string;
+  updatedAt?: unknown;
 }
 
 export interface Mapel {
@@ -11,7 +12,8 @@ export interface Mapel {
   namaMapel: string;
   semester: string;
   tahunAjaran: string;
-  updatedAt?: number;
+  userUid?: string;
+  updatedAt?: unknown;
 }
 
 export interface Jadwal {
@@ -20,7 +22,8 @@ export interface Jadwal {
   jam: string;
   kelas: string;
   mapel: string;
-  updatedAt?: number;
+  userUid?: string;
+  updatedAt?: unknown;
 }
 
 export interface LogAbsensi {
@@ -35,7 +38,8 @@ export interface LogAbsensi {
   bulan: string;
   tahun: string;
   namaGuru: string;
-  updatedAt?: number;
+  userUid?: string;
+  updatedAt?: unknown;
 }
 
 export interface DataNilai {
@@ -48,7 +52,8 @@ export interface DataNilai {
   namaSiswa: string;
   nilai: number | '';
   namaGuru: string;
-  updatedAt?: number;
+  userUid?: string;
+  updatedAt?: unknown;
 }
 
 export interface JurnalAgenda {
@@ -62,14 +67,16 @@ export interface JurnalAgenda {
   absenSiswa: string;
   ket?: string;
   namaGuru: string;
-  updatedAt?: number;
+  userUid?: string;
+  updatedAt?: unknown;
 }
 
 export interface SiswaBimbingan {
   id: string;
   namaSiswa: string;
   kelas: string;
-  updatedAt?: number;
+  userUid?: string;
+  updatedAt?: unknown;
 }
 
 export interface BimbinganWali {
@@ -81,7 +88,8 @@ export interface BimbinganWali {
   kasus: string;
   tindakLanjut: string;
   guruWali: string;
-  updatedAt?: number;
+  userUid?: string;
+  updatedAt?: unknown;
 }
 
 export interface Pengaturan {
@@ -98,6 +106,8 @@ export interface Pengaturan {
   username?: string;
   password?: string;
   isDatabaseCleared?: boolean;
+  userUid?: string;
+  updatedAt?: unknown;
 }
 
 export interface ModulFormState {

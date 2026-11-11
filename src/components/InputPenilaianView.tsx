@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Star, Save, CheckCircle2, History, Pencil, Trash2, Search, Filter, X, Check } from "lucide-react";
 import { Siswa, Mapel, DataNilai, Pengaturan } from "../types";
-import { saveDocument, deleteDocument, batchSaveDocuments, COLLECTIONS } from "../lib/firebase";
+import { saveDocument, deleteDocument, batchSaveDocuments, buildSafeDocId, COLLECTIONS } from "../lib/firebase";
 import { 
   notifySimpanSuccess, 
   notifySimpanError, 
@@ -79,7 +79,7 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
 
     const todayStr = new Date().toISOString().split("T")[0];
     const itemsToSave: DataNilai[] = studentsInClass.map((s) => {
-      const docId = `${selectedKelas}_${selectedMapel}_${jenisPenilaian}_${s.id}`;
+      const docId = buildSafeDocId(selectedKelas, selectedMapel, jenisPenilaian, s.id);
       return {
         id: docId,
         waktu: todayStr,
@@ -110,8 +110,30 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
   // Save Edited Nilai Item
   const handleSaveEditedNilai = async (id: string) => {
     if (!editNilaiData) return;
+    if (
+      !editNilaiData.kelas?.trim() ||
+      !editNilaiData.mapel?.trim() ||
+      !editNilaiData.jenis?.trim() ||
+      !editNilaiData.namaSiswa?.trim()
+    ) {
+      notifyEditError("Kelas, Mata Pelajaran, Jenis Penilaian, dan Nama Siswa wajib diisi.");
+      return;
+    }
+
+    const numericNilai =
+      editNilaiData.nilai === "" || editNilaiData.nilai === undefined
+        ? ""
+        : Math.min(100, Math.max(0, Number(editNilaiData.nilai)));
+
     try {
-      await saveDocument(COLLECTIONS.DATA_NILAI, id, editNilaiData);
+      await saveDocument(COLLECTIONS.DATA_NILAI, id, {
+        ...editNilaiData,
+        kelas: editNilaiData.kelas.trim(),
+        mapel: editNilaiData.mapel.trim(),
+        jenis: editNilaiData.jenis.trim(),
+        namaSiswa: editNilaiData.namaSiswa.trim(),
+        nilai: numericNilai
+      });
       setEditingNilaiId(null);
       setEditNilaiData(null);
       notifyEditSuccess("Data nilai siswa berhasil diperbarui!");

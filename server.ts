@@ -1,4 +1,5 @@
 import express from "express";
+import fs from "fs";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
@@ -7,9 +8,66 @@ import firebaseConfigData from "./firebase-applet-config.json";
 
 dotenv.config();
 
+function isPlaceholderServerValue(val: string): boolean {
+  const normalized = val.trim();
+  if (!normalized) return true;
+  const lower = normalized.toLowerCase();
+  if (lower === "undefined" || lower === "null" || lower === "remixed-project-id") return true;
+  if (normalized.startsWith("MY_") || normalized.startsWith("YOUR_")) return true;
+  return false;
+}
+
+function pickServerEnv(...candidates: Array<string | undefined>): string {
+  for (const candidate of candidates) {
+    if (typeof candidate === "string") {
+      const trimmed = candidate.trim();
+      if (!isPlaceholderServerValue(trimmed)) {
+        return trimmed;
+      }
+    }
+  }
+  return "";
+}
+
+function getServerFirebaseConfig() {
+  const projectId = pickServerEnv(
+    process.env.VITE_PENGATURAN_FIREBASE_PROJECT_ID,
+    process.env.VITE_FIREBASE_PROJECT_ID,
+    firebaseConfigData.projectId
+  );
+  const explicitDbId = pickServerEnv(
+    process.env.VITE_PENGATURAN_FIREBASE_DATABASE_ID,
+    process.env.VITE_FIREBASE_DATABASE_ID
+  );
+  const defaultDbId =
+    projectId === firebaseConfigData.projectId
+      ? pickServerEnv(firebaseConfigData.firestoreDatabaseId, "(default)")
+      : "(default)";
+
+  return {
+    apiKey: pickServerEnv(
+      process.env.VITE_PENGATURAN_FIREBASE_API_KEY,
+      process.env.VITE_FIREBASE_API_KEY,
+      firebaseConfigData.apiKey
+    ),
+    authDomain: pickServerEnv(
+      process.env.VITE_PENGATURAN_FIREBASE_AUTH_DOMAIN,
+      process.env.VITE_FIREBASE_AUTH_DOMAIN,
+      firebaseConfigData.authDomain
+    ),
+    projectId,
+    databaseId: explicitDbId || defaultDbId,
+    appId: pickServerEnv(
+      process.env.VITE_PENGATURAN_FIREBASE_APP_ID,
+      process.env.VITE_FIREBASE_APP_ID,
+      firebaseConfigData.appId
+    )
+  };
+}
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json({ limit: "10mb" }));
 
@@ -82,7 +140,13 @@ async function startServer() {
 
   // Health check API
   app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
+    const fbCfg = getServerFirebaseConfig();
+    res.json({
+      status: "ok",
+      mode: process.env.NODE_ENV || "development",
+      firebaseReady: Boolean(fbCfg.apiKey && fbCfg.projectId && fbCfg.appId),
+      timestamp: new Date().toISOString()
+    });
   });
 
   // API Auth: Secure server-side authentication login endpoint
@@ -94,10 +158,8 @@ async function startServer() {
 
       // Query Firestore database directly for updated credentials saved in Pengaturan
       try {
-        const projectId = process.env.VITE_FIREBASE_PROJECT_ID || firebaseConfigData.projectId;
-        const dbId = process.env.VITE_FIREBASE_DATABASE_ID || firebaseConfigData.firestoreDatabaseId || "(default)";
-        const apiKey = process.env.VITE_FIREBASE_API_KEY || firebaseConfigData.apiKey;
-        const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${dbId}/documents/pengaturan/config?key=${apiKey}`;
+        const fbCfg = getServerFirebaseConfig();
+        const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${fbCfg.projectId}/databases/${fbCfg.databaseId}/documents/pengaturan/config?key=${fbCfg.apiKey}`;
         
         const dbResponse = await fetch(firestoreUrl);
         if (dbResponse.ok) {
@@ -1792,9 +1854,15 @@ Hasilkan MURNI kode HTML (tanpa code block markdown \`\`\`html).
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
+    const cwdDist = path.join(process.cwd(), "dist");
+    const distPath = fs.existsSync(path.join(cwdDist, "index.html")) ? cwdDist : __dirname;
+    app.use((_req, res, next) => {
+      res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+      next();
+    });
     app.use(express.static(distPath));
     app.get("*", (_req, res) => {
+      res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
