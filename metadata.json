@@ -1,0 +1,10 @@
+{
+  "name": "Remix SMANSATER PRO",
+  "description": "Sistem Administrasi Guru Digital terintegrasi Asisten AI dan Firebase Database.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

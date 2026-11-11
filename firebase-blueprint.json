@@ -1,0 +1,117 @@
+{
+  "entities": {
+    "data_siswa": {
+      "title": "Data Siswa",
+      "description": "Master Data Siswa",
+      "type": "object",
+      "properties": {
+        "NISN": { "type": "string" },
+        "nama": { "type": "string" },
+        "kelas": { "type": "string" }
+      },
+      "required": ["NISN", "nama", "kelas"]
+    },
+    "mapel": {
+      "title": "Mata Pelajaran",
+      "description": "Master Mata Pelajaran",
+      "type": "object",
+      "properties": {
+        "namaMapel": { "type": "string" },
+        "semester": { "type": "string" },
+        "tahunAjaran": { "type": "string" }
+      },
+      "required": ["namaMapel"]
+    },
+    "jadwal": {
+      "title": "Jadwal Mengajar",
+      "type": "object",
+      "properties": {
+        "hari": { "type": "string" },
+        "jam": { "type": "string" },
+        "kelas": { "type": "string" },
+        "mapel": { "type": "string" }
+      }
+    },
+    "log_absensi": {
+      "title": "Log Absensi",
+      "type": "object",
+      "properties": {
+        "tanggal": { "type": "string" },
+        "kelas": { "type": "string" },
+        "mapel": { "type": "string" },
+        "idSiswa": { "type": "string" },
+        "namaSiswa": { "type": "string" },
+        "status": { "type": "string" },
+        "bulan": { "type": "string" },
+        "tahun": { "type": "string" },
+        "namaGuru": { "type": "string" }
+      }
+    },
+    "data_nilai": {
+      "title": "Data Nilai",
+      "type": "object",
+      "properties": {
+        "waktu": { "type": "string" },
+        "jenis": { "type": "string" },
+        "mapel": { "type": "string" },
+        "kelas": { "type": "string" },
+        "idSiswa": { "type": "string" },
+        "namaSiswa": { "type": "string" },
+        "nilai": { "type": "number" },
+        "namaGuru": { "type": "string" }
+      }
+    },
+    "jurnal_agenda": {
+      "title": "Jurnal Agenda Mengajar",
+      "type": "object",
+      "properties": {
+        "tanggal": { "type": "string" },
+        "jam": { "type": "string" },
+        "kelas": { "type": "string" },
+        "mapel": { "type": "string" },
+        "materi": { "type": "string" },
+        "status": { "type": "string" },
+        "absenSiswa": { "type": "string" },
+        "ket": { "type": "string" },
+        "namaGuru": { "type": "string" }
+      }
+    },
+    "bimbingan_wali": {
+      "title": "Catatan Bimbingan Wali",
+      "type": "object",
+      "properties": {
+        "tanggal": { "type": "string" },
+        "namaSiswa": { "type": "string" },
+        "kelas": { "type": "string" },
+        "jenis": { "type": "string" },
+        "kasus": { "type": "string" },
+        "tindakLanjut": { "type": "string" },
+        "guruWali": { "type": "string" }
+      }
+    },
+    "siswa_bimbingan": {
+      "title": "Daftar Siswa Bimbingan",
+      "type": "object",
+      "properties": {
+        "namaSiswa": { "type": "string" },
+        "kelas": { "type": "string" }
+      }
+    },
+    "pengaturan": {
+      "title": "Pengaturan Aplikasi",
+      "type": "object",
+      "properties": {
+        "Nama_Guru": { "type": "string" },
+        "NIP_Guru": { "type": "string" },
+        "Pemerintah": { "type": "string" },
+        "Nama_Sekolah": { "type": "string" },
+        "Alamat_Sekolah": { "type": "string" },
+        "Nama_Kepsek": { "type": "string" },
+        "NIP_Kepsek": { "type": "string" },
+        "Tempat_Tanda_Tangan": { "type": "string" },
+        "Logo_Kiri": { "type": "string" },
+        "Logo_Kanan": { "type": "string" }
+      }
+    }
+  }
+}

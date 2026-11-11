@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+@layer utilities {
+  /* Prevent blue tap highlight overlay on mobile devices */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Native touch behavior and smooth scrolling */
+  html, body {
+    touch-action: manipulation;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Custom subtle scrollbar for mobile native feel */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.3);
+    border-radius: 9999px;
+  }
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(51, 65, 85, 0.5);
+  }
+
+  /* Safe Area Inset Padding for modern mobile screens */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 12px);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+}
+
+/* Specific Mobile Layout Fixes (@media max-width: 768px) */
+@media (max-width: 768px) {
+  /* Header App Bar alignment & spacing fixes */
+  header {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+
+  /* Stat Cards - Enforce Single Vertical Column Stack */
+  .dashboard-stats-grid,
+  div:has(> div > h3:contains("Total Siswa")) {
+    grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+  }
+
+  /* Ensure card descriptions display completely without vertical clipping */
+  .line-clamp-2 {
+    display: block !important;
+    -webkit-line-clamp: unset !important;
+    overflow: visible !important;
+  }
+
+  /* Clean Touch Target Ergonomics */
+  button, a {
+    touch-action: manipulation;
+  }
+}
+
+/* Global Print Stylesheet for Report Headers & Logos */
+@media print {
+  body {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  img, .logo-sekolah, .kop-logo {
+    display: inline-block !important;
+    visibility: visible !important;
+    max-height: 80px;
+    width: auto;
+    object-fit: contain;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
